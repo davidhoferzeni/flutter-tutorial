@@ -1,14 +1,57 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'dart:async';
 
 import 'package:pedometer/pedometer.dart';
+import 'package:workmanager/workmanager.dart';
 
 String formatDate(DateTime d) {
   return d.toString().substring(0, 19);
 }
 
+const periodicTaskId = "be.tramckrijte.workmanagerExample.periodicTask";
+const simpleTaskId = "be.tramckrijte.workmanagerExample.simpleTask";
+
 void main() {
   runApp(MyApp());
+}
+
+@pragma(
+    'vm:entry-point') // Mandatory if the App is obfuscated or using Flutter 3.1+
+void callbackDispatcher() {
+  Workmanager().executeTask((task, inputData) async {
+    print("$task was executed");
+    return Future.value(true);
+  });
+}
+
+class LifecycleEventHandler extends WidgetsBindingObserver {
+  final AsyncCallback? resumeCallBack;
+  final AsyncCallback? suspendingCallBack;
+
+  LifecycleEventHandler({
+    this.resumeCallBack,
+    this.suspendingCallBack,
+  });
+
+  @override
+  Future<void> didChangeAppLifecycleState(AppLifecycleState state) async {
+    switch (state) {
+      case AppLifecycleState.resumed:
+        if (resumeCallBack != null) {
+          await resumeCallBack!();
+        }
+        break;
+      case AppLifecycleState.inactive:
+      case AppLifecycleState.paused:
+      case AppLifecycleState.detached:
+      case AppLifecycleState.hidden:
+        if (suspendingCallBack != null) {
+          await suspendingCallBack!();
+        }
+        break;
+    }
+  }
 }
 
 class MyApp extends StatefulWidget {
@@ -64,6 +107,24 @@ class _MyAppState extends State<MyApp> {
 
     _stepCountStream = Pedometer.stepCountStream;
     _stepCountStream.listen(onStepCount).onError(onStepCountError);
+
+    // automatically initialize background tasks
+    Workmanager().initialize(
+      callbackDispatcher,
+      isInDebugMode: true,
+    );
+    // update step count every few minutes in case of system reboot
+    Workmanager().registerPeriodicTask(
+      periodicTaskId,
+      periodicTaskId,
+      frequency: Duration(minutes: 5),
+    );
+    // update step count immediately when app launches
+    // to resolve issue: https://github.com/cph-cachet/flutter-plugins/issues/810
+    WidgetsBinding.instance.addObserver(LifecycleEventHandler(
+        resumeCallBack: () async => setState(() {
+              Workmanager().registerOneOffTask(simpleTaskId, simpleTaskId);
+            })));
 
     if (!mounted) return;
   }
